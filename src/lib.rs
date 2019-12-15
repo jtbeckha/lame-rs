@@ -38,6 +38,22 @@ fn handle_simple_error(retn: c_int) -> Result<(), Error> {
     }
 }
 
+fn handle_encode_error(retn: c_int) -> Result<usize, EncodeError> {
+    match retn {
+        -1 => Err(EncodeError::OutputBufferTooSmall),
+        -2 => Err(EncodeError::NoMem),
+        -3 => Err(EncodeError::InitParamsNotCalled),
+        -4 => Err(EncodeError::PsychoAcousticError),
+        _ => {
+            if retn < 0 {
+                Err(EncodeError::Unknown(retn))
+            } else {
+                Ok(retn as usize)
+            }
+        }
+    }
+}
+
 fn int_size(sz: usize) -> c_int {
     if sz > c_int::max_value() as usize {
         panic!("converting {} to c_int would overflow");
@@ -138,25 +154,19 @@ impl Lame {
             panic!("left and right channels must have same number of samples!");
         }
 
-        let retn = unsafe {
+        handle_encode_error(unsafe {
             ffi::lame_encode_buffer(self.ptr,
                 pcm_left.as_ptr(), pcm_right.as_ptr(), int_size(pcm_left.len()),
-                mp3_buffer.as_mut_ptr(), int_size(mp3_buffer.len()))
-        };
+                mp3_buffer.as_mut_ptr(), int_size(mp3_buffer.len())) })
+    }
 
-        match retn {
-            -1 => Err(EncodeError::OutputBufferTooSmall),
-            -2 => Err(EncodeError::NoMem),
-            -3 => Err(EncodeError::InitParamsNotCalled),
-            -4 => Err(EncodeError::PsychoAcousticError),
-            _ => {
-                if retn < 0 {
-                    Err(EncodeError::Unknown(retn))
-                } else {
-                    Ok(retn as usize)
-                }
-            }
-        }
+    /// Flushes internal LAME buffers to ensure the last few MP3 frames are complete.
+    /// This should be called after all PCM data has been passed to `encode`. The
+    /// `mp3_buffer` should be at least 7200 bytes long to hold all possible emitted
+    /// data.
+    pub fn encode_flush(&mut self, mp3_buffer: &mut [u8]) -> Result<usize, EncodeError> {
+        handle_encode_error(unsafe {
+            ffi::lame_encode_flush(self.ptr, mp3_buffer.as_mut_ptr(), int_size(mp3_buffer.len())) })
     }
 }
 
